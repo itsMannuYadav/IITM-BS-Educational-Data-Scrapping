@@ -60,15 +60,30 @@ Outputs:
 | sundarbans.iitmbs.org | Study Corner catalog | Public StudyView.js chunk (no login) |
 | unknowniitians.com | IITM notes/PYQs metadata + public Drive links | Public Supabase REST (anon key) |
 | letslearn1110.com | course catalog | Graphy/Spayee store JSON |
+| oppepractice.iitmbsdegree.in | OPPE PYQs + practice questions | `/api/subjects/{slug}/questions` + optional PDF solutions |
 
 ```bash
 python main.py scrape acegrade --no-download
 python main.py scrape sundarbans --no-download
 python main.py scrape unknowniitians --no-download
 python main.py scrape letslearn --no-download
+python main.py scrape oppepractice --no-download
 python main.py status
 python scripts\download_missing.py --source acegrade --limit 100
 python scripts\download_missing.py --source sundarbans --limit 50
 python scripts\download_missing.py --source unknowniitians --limit 50
 python scripts\export_index.py
 ```
+
+## OPPE Practice
+
+Question catalog is public (Python + DBMS live). Solution PDFs need a logged-in account with a phone number:
+
+```bash
+python main.py login oppepractice
+python main.py scrape oppepractice --no-download
+# After adding a phone number on the site:
+python main.py scrape oppepractice --download-limit 50
+```
+
+Outputs: `data/raw/oppepractice/questions_{slug}.json`, `data/files/oppepractice/` (PDFs).
