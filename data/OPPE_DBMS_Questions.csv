@@ -1,0 +1,31 @@
+Question Title,Subject,Topic,Difficulty,Exam Type,Question ID,Practice Link,Resource Type
+All jersey colours in use,DBMS,OPE SQL Questions,easy,OPPE,35c63a4d-ed80-4359-91ce-4bc3aa1f41f1,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Books by publisher,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,9b7be979-472f-4777-a9c5-7f23b70c3528,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Book age in years,DBMS,OPE SQL Questions,easy,OPPE,a3bb3b5b-ad83-4da1-88db-facd953c8434,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Books per Publisher,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,1a820592-3cfa-48c1-8a16-39cd79f9e9cd,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Book copies and their titles,DBMS,OPE SQL Questions,easy,OPPE,b90f8c50-db3b-483a-aa56-a56c9262d579,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Count Students in a Department,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,90678708-6808-4e6e-9dd0-25c2bead9ded,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Computer Science courses,DBMS,OPE SQL Questions,easy,OPPE,c61e13fe-3472-4b39-a888-80254c63a9c0,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Course Catalog Lookup,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,754a6a17-0fc7-4ace-b641-924994d770e2,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Contact numbers of students and faculty,DBMS,OPE SQL Questions,easy,OPPE,d69752cc-7659-4915-ba76-0d68e8fc1678,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Courses Offered by a Department,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,550b936c-4c9a-4022-b909-61ba45c46dc2,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Copies held per book,DBMS,OPE SQL Questions,easy,OPPE,2edf3694-dd7c-45d7-a0ac-0cecc4ae7411,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Courses Taught by a Department's Instructors,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,3d9e36b9-93e8-4f90-a42f-ade9da3a886a,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Courses mentioning machine (case-insensitive),DBMS,OPE SQL Questions,easy,OPPE,2c7693fe-9802-46fd-af84-8bdf98b4c350,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Department Details by Name,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,564d3846-53e2-4435-b89b-dfd5d917222d,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Distinct home jersey colours,DBMS,OPE SQL Questions,easy,OPPE,264dcfbf-436f-4f6f-82c5-9d6a2bc9e07b,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Department Office Lookup,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,2868dada-abdf-4024-884e-b66a6436b1a5,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Every team appearance across matches,DBMS,OPE SQL Questions,easy,OPPE,da3a1a0e-4d60-42c8-b612-9de9d7c117b5,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Instructors of a Department by Salary,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,ef72d4fc-b9cf-4049-8a20-d5700257bf91,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Highest host score in any match,DBMS,OPE SQL Questions,easy,OPPE,957b78c0-612a-4eb7-8b7d-a46395a8420d,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Roster of a Team,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,acc38396-f1be-4ac8-8f87-192360b419c9,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Home goals scored per host team,DBMS,OPE SQL Questions,easy,OPPE,8229c773-d3e5-425a-996c-eff13b2873cb,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Squad Roster by Jersey Number,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,aa13d9e6-de7f-4755-b5f4-454098a451d0,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Instructor monthly salary,DBMS,OPE SQL Questions,easy,OPPE,2fc38f10-f745-400d-bf11-e410d61c9908,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Squad size of a team,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,5ece95d3-3bb9-4fb4-9c08-d99a7a5b82a9,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Instructor names in uppercase,DBMS,OPE SQL Questions,easy,OPPE,19fb7d3a-a52a-425e-a6c1-f02bd54ee179,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Team by home city,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,d2cc7b39-4884-433a-bb16-f2480d3ffe34,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Instructors above the overall average salary,DBMS,OPE SQL Questions,easy,OPPE,212d261f-cdbb-4cf7-b5a7-80a227219de8,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Team jersey colors,DBMS,OPE Python-PostgreSQL Questions,easy,OPPE,35c66e3f-e406-42ec-8790-a37fb3ee67d6,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Instructors and their department building,DBMS,OPE SQL Questions,easy,OPPE,af871042-e073-4d36-8ed3-daa19fd440c5,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper
+Average Instructor Salary by Department,DBMS,OPE Python-PostgreSQL Questions,medium,OPPE,d8578abe-389c-461d-91c4-483def62d89b,https://oppepractice.iitmbsdegree.in/app/subjects/dbms,previous_paper

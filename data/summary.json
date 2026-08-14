@@ -1,0 +1,21 @@
+{
+  "total": 6785,
+  "by_type": {
+    "notes": 2737,
+    "previous_paper": 2049,
+    "lecture": 1944,
+    "syllabus": 2,
+    "other": 2,
+    "gdrive": 20,
+    "link": 31
+  },
+  "by_source": {
+    "acegrade": 2986,
+    "sundarbans": 2086,
+    "letslearn": 31,
+    "unknowniitians": 1682
+  },
+  "with_local_file": 1977,
+  "with_gdrive": 3244,
+  "csv": "D:\\IITM BS Educational Data Scrapping\\data\\index.csv"
+}
