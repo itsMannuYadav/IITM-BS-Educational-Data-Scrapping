@@ -22,7 +22,7 @@ from urllib.parse import urljoin
 import httpx
 from rich.console import Console
 
-from core.config import INDEX_PATH, REQUEST_DELAY_SECONDS, auth_state_path, load_index
+from core.config import INDEX_PATH, REQUEST_DELAY_SECONDS, auth_state_path, load_index, source_files_dir
 from core.fetch import safe_name
 from core.schema import ResourceRecord, ResourceType
 from core.store import write_raw_json
@@ -34,6 +34,7 @@ BASE = "https://oppepractice.iitmbsdegree.in"
 SUPA = "https://hzlqdbmyvltvoqiaojjg.supabase.co"
 API_DELAY = 0.35
 PAGE = 30
+JSON_DIRNAME = "json"
 FALLBACK_SLUGS = ("python", "dbms", "pdsa", "java", "c", "syscmd", "linux", "embedded-c")
 SEED_PATHS = ["/", "/app/subjects", "/leaderboard", "/contact", "/privacy"]
 APP_PATHS = ["/app/subjects", "/app/progress", "/app/subjects/python", "/app/subjects/dbms"]
@@ -152,6 +153,560 @@ async def harvest_questions(
     return rows
 
 
+RSC_REF_RE = re.compile(r"^\$L?([0-9a-fA-F]+)$")
+RSC_HEADERS = {
+    "RSC": "1",
+    "Accept": "text/x-component",
+    "User-Agent": HEADERS["User-Agent"],
+}
+
+
+def parse_rsc_text_chunks(text: str) -> dict[str, str]:
+    """Parse Next.js flight rows. `id:T{hexlen},{bytes}` lengths are UTF-8 bytes
+    and the next row may start immediately, with no newline."""
+    data = text.encode("utf-8")
+    hexdigits = b"0123456789abcdefABCDEF"
+    chunks: dict[str, str] = {}
+    i = 0
+    n = len(data)
+    while i < n:
+        if data[i] in (10, 13):
+            i += 1
+            continue
+        j = i
+        while j < n and data[j] in hexdigits:
+            j += 1
+        if j == i or j >= n or data[j] != 58:  # ':'
+            i += 1
+            continue
+        cid = data[i:j].decode("ascii").lower()
+        j += 1
+        if j < n and data[j] == 84:  # 'T'
+            k = j + 1
+            while k < n and data[k] in hexdigits:
+                k += 1
+            if k > j + 1 and k < n and data[k] == 44:  # ','
+                size = int(data[j + 1 : k], 16)
+                start = k + 1
+                payload = data[start : start + size]
+                try:
+                    chunks[cid] = payload.decode("utf-8")
+                except UnicodeDecodeError:
+                    chunks[cid] = payload.decode("utf-8", errors="replace")
+                i = start + size
+                continue
+        nl = data.find(b"\n", j)
+        if nl < 0:
+            break
+        i = nl + 1
+    return chunks
+
+
+def _json_slice(text: str, start: int) -> str | None:
+    if start >= len(text) or text[start] not in "{[":
+        return None
+    stack: list[str] = []
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch in "}]":
+            if not stack or stack[-1] != ch:
+                return None
+            stack.pop()
+            if not stack:
+                return text[start : i + 1]
+    return None
+
+
+def is_rsc_ref(value: Any) -> bool:
+    return isinstance(value, str) and bool(RSC_REF_RE.fullmatch(value))
+
+
+def resolve_rsc_refs(value: Any, chunks: dict[str, str]) -> Any:
+    if value == "$undefined":
+        return None
+    if isinstance(value, str):
+        m = RSC_REF_RE.fullmatch(value)
+        if not m:
+            return value
+        cid = m.group(1).lower()
+        if cid in chunks:
+            return chunks[cid]
+        return value
+    if isinstance(value, list):
+        return [resolve_rsc_refs(v, chunks) for v in value]
+    if isinstance(value, dict):
+        return {k: resolve_rsc_refs(v, chunks) for k, v in value.items()}
+    return value
+
+
+def payload_needs_refetch(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return True
+    body = payload.get("body_md")
+    if not body or is_rsc_ref(body):
+        return True
+    stack: list[Any] = [payload]
+    while stack:
+        cur = stack.pop()
+        if is_rsc_ref(cur):
+            return True
+        if isinstance(cur, dict):
+            stack.extend(cur.values())
+        elif isinstance(cur, list):
+            stack.extend(cur)
+    return False
+
+
+def _loads_rsc_json(blob: str) -> Any:
+    return json.loads(blob.replace("$undefined", "null"))
+
+
+def extract_rsc_object(text: str, key: str) -> dict[str, Any] | None:
+    chunks = parse_rsc_text_chunks(text)
+    needle = f'"{key}":'
+    pos = 0
+    while True:
+        idx = text.find(needle, pos)
+        if idx < 0:
+            return None
+        i = idx + len(needle)
+        while i < len(text) and text[i] in " \n\r\t":
+            i += 1
+        blob = _json_slice(text, i)
+        if blob:
+            try:
+                data = _loads_rsc_json(blob)
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict):
+                data = resolve_rsc_refs(data, chunks)
+                if key == "current" and (data.get("body_md") is not None or data.get("id")):
+                    return data
+                if key == "subject" and data.get("slug"):
+                    return data
+                if key not in {"current", "subject"}:
+                    return data
+        pos = idx + len(needle)
+
+
+def extract_keyed_arrays(text: str, key: str) -> list[dict[str, Any]]:
+    needle = f'"{key}":'
+    out: list[dict[str, Any]] = []
+    pos = 0
+    while True:
+        idx = text.find(needle, pos)
+        if idx < 0:
+            break
+        i = idx + len(needle)
+        while i < len(text) and text[i] in " \n\r\t":
+            i += 1
+        blob = _json_slice(text, i)
+        pos = idx + len(needle)
+        if not blob:
+            continue
+        try:
+            data = _loads_rsc_json(blob)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, list):
+            out.extend(row for row in data if isinstance(row, dict))
+    return out
+
+
+def extract_test_run(text: str) -> dict[str, Any] | None:
+    chunks = parse_rsc_text_chunks(text)
+    pos = 0
+    while True:
+        idx = text.find('{"slug":', pos)
+        if idx < 0:
+            return None
+        blob = _json_slice(text, idx)
+        pos = idx + 8
+        if not blob:
+            continue
+        try:
+            data = _loads_rsc_json(blob)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict) or not isinstance(data.get("sections"), list):
+            continue
+        resolved = resolve_rsc_refs(data, chunks)
+        if resolved.get("sections"):
+            return resolved
+    return None
+
+
+async def fetch_rsc(client: httpx.AsyncClient, url: str, cookies: dict[str, str] | None = None) -> httpx.Response:
+    await asyncio.sleep(API_DELAY)
+    return await client.get(url, cookies=cookies, headers=RSC_HEADERS)
+
+
+def question_json_path(slug: str, qid: str, title: str) -> Path:
+    name = safe_name(f"{qid[:8]}_{title}.json")
+    return source_files_dir(SOURCE) / JSON_DIRNAME / slug / name
+
+
+async def fetch_question_detail(
+    client: httpx.AsyncClient, qid: str, cookies: dict[str, str] | None = None
+) -> dict[str, Any] | None:
+    url = f"{BASE}/app/questions/{qid}"
+    resp = await fetch_rsc(client, url, cookies=cookies)
+    if resp.status_code != 200:
+        console.print(f"[yellow]detail {resp.status_code}[/yellow] {qid}")
+        return None
+    current = extract_rsc_object(resp.text, "current")
+    subject = extract_rsc_object(resp.text, "subject")
+    if not current:
+        return None
+    if subject:
+        current["subject"] = subject
+    return current
+
+
+async def harvest_question_jsons(
+    client: httpx.AsyncClient,
+    records: list[ResourceRecord],
+    cookies: dict[str, str],
+    *,
+    limit: int | None = None,
+) -> list[dict]:
+    pending = [r for r in records if r.extra.get("question_id")]
+    if limit is not None:
+        pending = pending[:limit]
+    console.print(f"[bold]Question JSON[/bold] ({len(pending)} questions)")
+    saved = 0
+    skipped = 0
+    failed = 0
+    combined: list[dict] = []
+    for i, rec in enumerate(pending, 1):
+        qid = str(rec.extra.get("question_id"))
+        slug = str(rec.extra.get("subject") or "misc")
+        dest = question_json_path(slug, qid, rec.title)
+        if dest.exists() and dest.stat().st_size > 50:
+            try:
+                payload = json.loads(dest.read_text(encoding="utf-8"))
+            except Exception:
+                payload = None
+            if isinstance(payload, dict) and not payload_needs_refetch(payload):
+                rec.extra["json_path"] = str(dest)
+                rec.extra["has_body"] = True
+                rec.extra["has_solution"] = bool(
+                    payload.get("solution_md") or payload.get("reference_sql")
+                )
+                combined.append(payload)
+                skipped += 1
+                continue
+        detail = await fetch_question_detail(client, qid, cookies=cookies)
+        if not detail or payload_needs_refetch(detail):
+            failed += 1
+            if failed <= 5 or i % 50 == 0:
+                console.print(f"  [yellow]incomplete body[/yellow] {rec.title}")
+            continue
+        nested_subject = detail.pop("subject", None)
+        if isinstance(nested_subject, dict):
+            slug = str(nested_subject.get("slug") or slug)
+            subject_name = nested_subject.get("name") or rec.course
+        else:
+            subject_name = rec.course
+        payload = {
+            "source": SOURCE,
+            "url": rec.original_url,
+            "subject": slug,
+            "subject_name": subject_name,
+            "exam": rec.term or rec.extra.get("exam"),
+            "tags": rec.extra.get("tags") or [],
+            "topic_id": rec.extra.get("topic_id"),
+            **detail,
+        }
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        rec.extra["json_path"] = str(dest)
+        rec.extra["has_body"] = True
+        rec.extra["has_solution"] = bool(payload.get("solution_md") or payload.get("reference_sql"))
+        combined.append(payload)
+        saved += 1
+        if saved <= 3 or saved % 25 == 0:
+            console.print(f"  [green]{saved}[/green] {slug}/{rec.title[:50]}")
+    console.print(
+        f"[green]Practice JSON saved {saved}[/green]  skipped complete {skipped}  "
+        f"failed {failed}  total {saved + skipped}"
+    )
+    return combined
+
+
+def write_full_questions(rows: list[dict[str, Any]]) -> None:
+    write_raw_json(SOURCE, "questions_full.json", rows)
+    jsonl = Path("data/raw/oppepractice/questions_full.jsonl")
+    jsonl.parent.mkdir(parents=True, exist_ok=True)
+    with jsonl.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def test_set_looks_valid(row: dict[str, Any]) -> bool:
+    return bool(row.get("id") and row.get("name") and ("questionCount" in row or "available" in row))
+
+
+async def discover_test_sets(
+    client: httpx.AsyncClient,
+    slugs: list[str],
+    cookies: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    found: dict[tuple[str, str], dict[str, Any]] = {}
+    for slug in slugs:
+        for tab in ("test-series", "pyqs"):
+            url = f"{BASE}/app/subjects/{slug}?tab={tab}"
+            resp = await fetch_rsc(client, url, cookies=cookies)
+            if resp.status_code != 200:
+                console.print(f"[yellow]test list {resp.status_code}[/yellow] {slug}?tab={tab}")
+                continue
+            for key in ("sets", "past"):
+                for item in extract_keyed_arrays(resp.text, key):
+                    if not test_set_looks_valid(item):
+                        continue
+                    sid = str(item["id"])
+                    row = {
+                        **item,
+                        "subject": slug,
+                        "tab": tab,
+                        "list_source": key,
+                    }
+                    prev = found.get((slug, sid))
+                    if prev:
+                        tabs = list(dict.fromkeys((prev.get("tabs") or [prev.get("tab")]) + [tab]))
+                        row["tabs"] = tabs
+                        row["tab"] = prev.get("tab") or tab
+                    else:
+                        row["tabs"] = [tab]
+                    found[(slug, sid)] = row
+    rows = list(found.values())
+    write_raw_json(SOURCE, "test_sets.json", rows)
+    return rows
+
+
+def test_set_record(row: dict[str, Any], *, subject_name: str) -> ResourceRecord:
+    slug = str(row.get("subject") or "")
+    sid = str(row.get("id") or "")
+    name = (row.get("name") or sid).strip()
+    url = f"{BASE}/app/test/{slug}/{sid}/run?env=learning"
+    return ResourceRecord(
+        source=SOURCE,
+        title=name,
+        course=subject_name,
+        term=str(row.get("exam") or "OPPE"),
+        program=slug.upper(),
+        type=ResourceType.PREVIOUS_PAPER,
+        authors=["IITM BS Community"],
+        original_url=url,
+        extra={
+            "subject": slug,
+            "subject_name": subject_name,
+            "test_set_id": sid,
+            "exam": row.get("exam"),
+            "question_count": row.get("questionCount"),
+            "section_count": row.get("sectionCount"),
+            "duration_seconds": row.get("durationSeconds"),
+            "total_marks": row.get("totalMarks"),
+            "available": row.get("available"),
+            "tabs": row.get("tabs") or [row.get("tab")],
+            "category": "test_set",
+        },
+    )
+
+
+def test_question_record(
+    question: dict[str, Any],
+    *,
+    slug: str,
+    subject_name: str,
+    set_id: str,
+    set_name: str,
+    section: str | None,
+    exam: str | None,
+) -> ResourceRecord:
+    qid = str(question.get("id") or "")
+    title = (question.get("title") or "Question").strip()
+    page_url = f"{BASE}/app/test/{slug}/{set_id}/run?env=learning#question-{qid}"
+    pdf_url = f"{BASE}/api/questions/{qid}/pdf" if qid else None
+    return ResourceRecord(
+        source=SOURCE,
+        title=f"{set_name}: {title}",
+        course=subject_name,
+        term=str(exam) if exam else set_name,
+        program=slug.upper(),
+        type=classify(exam, question.get("kind")),
+        authors=["IITM BS Community"],
+        original_url=page_url,
+        file_url=pdf_url,
+        extra={
+            "subject": slug,
+            "subject_name": subject_name,
+            "question_id": qid,
+            "kind": question.get("kind"),
+            "marks": question.get("marks"),
+            "exam": exam,
+            "test_set_id": set_id,
+            "test_set_name": set_name,
+            "section": section,
+            "pdf_url": pdf_url,
+            "category": "test_question",
+        },
+    )
+
+
+def flatten_test_questions(
+    run: dict[str, Any],
+    *,
+    slug: str,
+    subject_name: str,
+    set_meta: dict[str, Any],
+    run_url: str,
+) -> list[dict[str, Any]]:
+    set_id = str(set_meta.get("id") or "")
+    set_name = str(run.get("setName") or set_meta.get("name") or set_id)
+    exam = set_meta.get("exam") or set_name
+    out: list[dict[str, Any]] = []
+    for section in run.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        section_name = section.get("name")
+        for question in section.get("questions") or []:
+            if not isinstance(question, dict) or not question.get("id"):
+                continue
+            qid = str(question["id"])
+            dest = (
+                source_files_dir(SOURCE)
+                / JSON_DIRNAME
+                / "tests"
+                / slug
+                / safe_name(set_id)
+                / safe_name(f"{qid[:8]}_{question.get('title') or 'question'}.json")
+            )
+            payload = {
+                "source": SOURCE,
+                "url": f"{run_url}#question-{qid}",
+                "subject": slug,
+                "subject_name": subject_name,
+                "exam": exam,
+                "test_set_id": set_id,
+                "test_set_name": set_name,
+                "section": section_name,
+                "category": "test_question",
+                **question,
+            }
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            payload["json_path"] = str(dest)
+            out.append(payload)
+    return out
+
+
+async def harvest_tests(
+    client: httpx.AsyncClient,
+    slugs: list[str],
+    names: dict[str, str],
+    cookies: dict[str, str],
+    records: list[ResourceRecord],
+) -> list[dict[str, Any]]:
+    sets = await discover_test_sets(client, slugs, cookies=cookies)
+    console.print(f"[bold]Mock tests / PYQs[/bold] ({len(sets)} sets)")
+    combined: list[dict] = []
+    saved = 0
+    failed = 0
+    for ts in sets:
+        slug = str(ts.get("subject") or "")
+        sid = str(ts.get("id") or "")
+        if not slug or not sid:
+            continue
+        if ts.get("available") is False:
+            console.print(f"  [dim]skip unavailable {slug}/{sid}[/dim]")
+            continue
+        subject_name = names.get(slug, slug)
+        rec = test_set_record(ts, subject_name=subject_name)
+        run_url = rec.original_url
+        dest = source_files_dir(SOURCE) / JSON_DIRNAME / "tests" / slug / f"{safe_name(sid)}.json"
+        resp = await fetch_rsc(client, run_url, cookies=cookies)
+        run = extract_test_run(resp.text) if resp.status_code == 200 else None
+        if resp.status_code != 200 or not run:
+            resp = await fetch_rsc(client, run_url, cookies=cookies)
+            run = extract_test_run(resp.text) if resp.status_code == 200 else None
+        if resp.status_code != 200:
+            failed += 1
+            console.print(f"  [yellow]test {resp.status_code}[/yellow] {slug}/{sid}")
+            records.append(rec)
+            continue
+        if not run:
+            failed += 1
+            fail_path = Path("data/raw/oppepractice") / f"rsc_test_fail_{safe_name(slug)}_{safe_name(sid)}.txt"
+            fail_path.parent.mkdir(parents=True, exist_ok=True)
+            fail_path.write_text(resp.text, encoding="utf-8")
+            console.print(f"  [yellow]no test payload[/yellow] {slug}/{sid}")
+            records.append(rec)
+            continue
+        set_payload = {
+            "source": SOURCE,
+            "url": run_url,
+            "subject": slug,
+            "subject_name": subject_name,
+            "test_set_id": sid,
+            "category": "test_set",
+            **ts,
+            "run": run,
+        }
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(set_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        rec.extra["json_path"] = str(dest)
+        rec.extra["has_body"] = True
+        records.append(rec)
+        questions = flatten_test_questions(
+            run,
+            slug=slug,
+            subject_name=subject_name,
+            set_meta=ts,
+            run_url=run_url,
+        )
+        combined.extend(questions)
+        for q in questions:
+            qrec = test_question_record(
+                q,
+                slug=slug,
+                subject_name=subject_name,
+                set_id=sid,
+                set_name=str(run.get("setName") or ts.get("name") or sid),
+                section=q.get("section"),
+                exam=ts.get("exam"),
+            )
+            qrec.extra["json_path"] = q.get("json_path")
+            qrec.extra["has_body"] = not payload_needs_refetch(q)
+            qrec.extra["has_solution"] = bool(q.get("solution_md") or q.get("reference_sql"))
+            records.append(qrec)
+        saved += 1
+        nq = sum(
+            len(s.get("questions") or [])
+            for s in (run.get("sections") or [])
+            if isinstance(s, dict)
+        )
+        console.print(f"  [green]{saved}[/green] {slug}/{sid} ({nq} questions)")
+    console.print(f"[green]Tests saved {saved}[/green]  failed {failed}  questions {len(combined)}")
+    return combined
+
+
 def classify(exam: str | None, kind: str | None) -> ResourceType:
     exam_l = (exam or "").lower()
     if "oppe" in exam_l or "pyq" in exam_l:
@@ -245,18 +800,26 @@ def subject_records(subjects: list[dict]) -> list[ResourceRecord]:
 def merge_into_index(new_records: list[ResourceRecord]) -> int:
     old_rows = load_index()
     preserved = [r for r in old_rows if r.get("source") != SOURCE]
-    old_local = {
+    old_ours = {
         r.get("original_url"): r
         for r in old_rows
-        if r.get("source") == SOURCE and r.get("local_path")
+        if r.get("source") == SOURCE
     }
     merged: list[dict] = list(preserved)
     for rec in new_records:
         row = rec.to_index_row()
-        prev = old_local.get(rec.original_url)
-        if prev and prev.get("local_path") and not rec.local_path:
-            row["local_path"] = prev["local_path"]
-            row["mime_or_ext"] = prev.get("mime_or_ext")
+        prev = old_ours.get(rec.original_url)
+        if prev:
+            if prev.get("local_path") and not rec.local_path:
+                row["local_path"] = prev["local_path"]
+                row["mime_or_ext"] = prev.get("mime_or_ext")
+            prev_extra = prev.get("extra") or {}
+            extra = row.get("extra") or {}
+            if prev_extra.get("json_path") and not extra.get("json_path"):
+                extra["json_path"] = prev_extra["json_path"]
+                extra["has_body"] = prev_extra.get("has_body", extra.get("has_body"))
+                extra["has_solution"] = prev_extra.get("has_solution", extra.get("has_solution"))
+                row["extra"] = extra
         merged.append(row)
     INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
     with INDEX_PATH.open("w", encoding="utf-8") as f:
@@ -392,10 +955,10 @@ async def scrape_and_download(
             "[yellow]No saved OPPE session.[/yellow] Catalog is public; "
             "PDFs need `python main.py login oppepractice` plus a phone number on the account."
         )
-
+    
     records: list[ResourceRecord] = []
     async with httpx.AsyncClient(
-        timeout=60,
+        timeout=60, 
         headers=HEADERS,
         follow_redirects=True,
     ) as client:
@@ -437,6 +1000,14 @@ async def scrape_and_download(
             "harvest_summary.json",
             {slug: len(rows) for slug, rows in by_slug.items()},
         )
+
+        practice_jsons = await harvest_question_jsons(client, records, cookies)
+
+        live_slugs = [s for s in slugs if names.get(s)]
+        test_jsons = await harvest_tests(client, live_slugs, names, cookies, records)
+        all_jsons = practice_jsons + test_jsons
+        write_full_questions(all_jsons)
+        console.print(f"[green]Wrote {len(all_jsons)} question JSON rows[/green]")
 
         if download:
             await try_download_pdfs(client, records, cookies, download_limit)

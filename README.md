@@ -60,7 +60,7 @@ Outputs:
 | sundarbans.iitmbs.org | Study Corner catalog | Public StudyView.js chunk (no login) |
 | unknowniitians.com | IITM notes/PYQs metadata + public Drive links | Public Supabase REST (anon key) |
 | letslearn1110.com | course catalog | Graphy/Spayee store JSON |
-| oppepractice.iitmbsdegree.in | OPPE PYQs + practice questions | `/api/subjects/{slug}/questions` + optional PDF solutions |
+| oppepractice.iitmbsdegree.in | OPPE PYQs + practice + mock tests | catalog API + RSC question/test pages + optional PDF solutions |
 
 ```bash
 python main.py scrape acegrade --no-download
@@ -77,7 +77,7 @@ python scripts\export_index.py
 
 ## OPPE Practice
 
-Question catalog is public (Python + DBMS live). Solution PDFs need a logged-in account with a phone number:
+Question catalog is public (Python + DBMS live). Each scrape also writes question/solution JSON. Solution PDFs need a logged-in account with a phone number:
 
 ```bash
 python main.py login oppepractice
@@ -86,4 +86,12 @@ python main.py scrape oppepractice --no-download
 python main.py scrape oppepractice --download-limit 50
 ```
 
-Outputs: `data/raw/oppepractice/questions_{slug}.json`, `data/files/oppepractice/` (PDFs).
+The scrape pulls the public catalog **and** every mock/PYQ set (`/app/test/{slug}/{set}/run?env=learning`). Next.js RSC `$22`-style string refs are resolved so `body_md`, `setup_sql`, schema notes, and solutions are real text.
+
+Outputs:
+- `data/raw/oppepractice/questions_{slug}.json` — catalog
+- `data/raw/oppepractice/test_sets.json` — mock + PYQ set list
+- `data/raw/oppepractice/questions_full.jsonl` — practice + test questions with full text
+- `data/files/oppepractice/json/` — one JSON file per practice question
+- `data/files/oppepractice/json/tests/` — one JSON file per test set and per test question
+- `data/files/oppepractice/` — PDFs (after phone + download)
